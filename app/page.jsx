@@ -4,11 +4,12 @@ import { FiDownload } from 'react-icons/fi';
 // components
 import Social from '@/components/Social';
 import Photo from '@/components/Photo';
+import Stats from '@/components/Stats';
 
 const Home = () => {
   return <section className="h-full">
     <div className="container mx-auto h-full">
-      <div className="flex flex-col xl:flex-row items-center justify-between xl:pt-8 xl:pb-24">
+      <div className="flex flex-col xl:flex-row items-center justify-between xl:pt-8 xl:pb-8">
         <div className="text-center xl:text-left order-2 xl:order-none">
           <span className="text-xl">Software Developer</span>
           <h1 className="h1">
@@ -21,16 +22,16 @@ const Home = () => {
           {/* btn and socials */}
           <div className="flex flex-col xl:flex-row items-center gap-8">
             <Button variant="outline" size="lg"
-              className="uppercase flex items-center gap-2"
+              className="uppercase flex items-center gap-2 duration-500"
             >
               <span>Download CV</span>
               <FiDownload className="text-xl ml-2" />
             </Button>
             <div className="mb-8 xl:mb-0">
-              <Social containerStyles="flex gap-6"
+              <Social containerStyles="flex gap-6 "
                 iconStyles="w-9 h-9 border border-accent rounded-full 
               flex justify-center items-center text-accent text-base 
-              hove:bg-accent hover:text-primary hover:transition-all duration-500" />
+              hover:bg-accent hover:text-primary hover:transition-all duration-500 " />
             </div>
           </div>
         </div>
@@ -40,6 +41,7 @@ const Home = () => {
         </div>
       </div>
     </div>
+    <Stats />
   </section>
 }
 

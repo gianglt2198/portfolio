@@ -1,40 +1,51 @@
 "use client";
 
-import { FaHtml5, FaCss3, FaJs, FaReact, FaFigma, FaNodeJs } from 'react-icons/fa';
-import { SiTailwindcss, SiNextdotjs } from 'react-icons/si';
+import { FaAws, FaPython } from 'react-icons/fa';
+import {
+    SiGo,
+    SiPostgresql,
+    SiDocker,
+    SiKubernetes,
+    SiRedis,
+    SiMongodb,
+    SiGraphql,
+    SiGooglecloud,
+    SiRust,
+    SiJenkins,
+} from 'react-icons/si';
 
 // about me
 const about = {
     title: "About Me",
-    description: "I am a full stack developer with a passion for creating beautiful and functional websites. I have experience with a variety of technologies including HTML, CSS, JavaScript, React, Node.js, and more. I am always looking to learn new things and improve my skills.",
+    description: "Senior Backend Developer with 6+ years of proven expertise in Golang, microservices architecture, and cloud-native infrastructure. Specialized in agentic AI development — designing, building, and deploying intelligent agents for autonomous operations. Strong background in performance optimization, distributed systems design, and scalable data pipelines.",
     info: [
         {
             fieldName: "Name",
-            fieldValue: "Giang Le",
+            fieldValue: "Le Thanh Giang",
         },
         {
             fieldName: "Phone",
-            fieldValue: "(+84) 123 456 789",
+            fieldValue: "(+84) 964 582 803",
         },
         {
             fieldName: "Experience",
-            fieldValue: "5+ Years",
+            fieldValue: "6+ Years",
         },
         {
-            fieldName: "Skype",
-            fieldValue: "giangle.dev",
+            fieldName: "GitHub",
+            fieldValue: "gianglt2198",
         },
         {
             fieldName: "Nationality",
-            fieldValue: "Viet Nam",
+            fieldValue: "Vietnam",
         },
         {
             fieldName: "Email",
             fieldValue: "giangle2198@gmail.com",
         },
         {
-            fieldName: "Freelance",
-            fieldValue: "Available",
+            fieldName: "Location",
+            fieldValue: "Ho Chi Minh City",
         },
         {
             fieldName: "Languages",
@@ -47,19 +58,25 @@ const about = {
 const experience = {
     icon: '',
     title: "My Experience",
-    description: "I have worked on a variety of projects including websites, web applications, and more. I have experience with both front-end and back-end development, and I am comfortable working with a variety of technologies.",
+    description: "Six years building and scaling production backend systems — from core banking and crypto market intelligence to AI-powered SaaS platforms.",
     items: [
         {
-            company: "TreehouseLab",
-            position: "Full Stack Developer",
-            duration: "2018 - Present",
-            description: "I have worked on a variety of projects including websites, web applications, and more. I have experience with both front-end and back-end development, and I am comfortable working with a variety of technologies.",
+            company: "TechX Vietnam",
+            position: "Back End Developer",
+            duration: "10/2024 - Present",
+            description: "FlowX & Easier — AI Sales Intelligence & Multi-Platform Ads. Built distributed crawling pipelines (50K+ profiles), optimized ClickHouse analytics (<2s p99), and integrated Generative AI for lead scoring. Stack: Golang, GraphQL, NATS JetStream, PostgreSQL, ClickHouse, AWS EKS.",
         },
         {
-            company: "Orient Commercial Joint Stock Bank",
-            position: "Software Engineer Fresher",
-            duration: "2016 - 2018",
-            description: "I worked as a front-end developer for a company where I was responsible for creating and maintaining websites and web applications. I worked closely with the design team to implement their designs and ensure that the final product was both beautiful and functional.",
+            company: "Treehouse Labs",
+            position: "Backend Developer",
+            duration: "04/2022 - 10/2024",
+            description: "Hyperion & Pulse TRHX — Cryptocurrency market intelligence. Designed microservices processing real-time blockchain/DeFi data, cut ingestion latency 60%, and deployed on K8s/GCP with 99.95% uptime. Stack: Golang, Kubernetes, GCP, Kafka/Pulsar, MongoDB, Vault.",
+        },
+        {
+            company: "Orient Commercial Joint Stock Bank (OCB)",
+            position: "Developer",
+            duration: "07/2020 - 04/2022",
+            description: "Card Core TECH — Card management, alerts, and operations. Built secure authentication/authorization, RESTful APIs, and caching that cut database load 30%. Stack: Golang, React, Jenkins, Docker, Kubernetes, LDAP.",
         },
     ]
 }
@@ -68,12 +85,22 @@ const experience = {
 const education = {
     icon: '',
     title: "My Education",
-    description: "I have a Bachelor's degree in Computer Science from the University of Science in Ho Chi Minh City, Viet Nam. I graduated in 2016 with a focus on web development and software engineering.",
+    description: "Bachelor's degree in Computer Science from the University of Information Technology (UIT), Ho Chi Minh City, Vietnam, complemented by industry cloud-native certifications.",
     items: [
         {
-            institution: "University of Science",
+            institution: "University of Information Technology (UIT)",
             degree: "Bachelor's Degree in Computer Science",
-            duration: "2012 - 2016",
+            duration: "2016 - 2020",
+        },
+        {
+            institution: "HashiCorp (Udemy)",
+            degree: "Terraform Associate 003",
+            duration: "2025",
+        },
+        {
+            institution: "KodeKloud",
+            degree: "KCNA — Kubernetes & Cloud Native Associate",
+            duration: "2023",
         },
     ]
 }
@@ -81,47 +108,55 @@ const education = {
 // skills
 const skills = {
     title: "My Skills",
-    description: "I have experience with a variety of technologies including HTML, CSS, JavaScript, React, Node.js, and more. I am always looking to learn new things and improve my skills.",
+    description: "A backend-focused toolkit spanning languages, data stores, and cloud-native infrastructure built up over six years of production engineering.",
     items: [
         {
-            icon: <FaHtml5 />,
-            name: "HTML",
-            level: "Expert",
+            icon: <SiGo />,
+            name: "Golang",
         },
         {
-            icon: <FaCss3 />,
-            name: "CSS",
-            level: "Expert",
+            icon: <SiRust />,
+            name: "Rust",
         },
         {
-            icon: <FaJs />,
-            name: "JavaScript",
-            level: "Expert",
+            icon: <FaPython />,
+            name: "Python",
         },
         {
-            icon: <FaReact />,
-            name: "React",
-            level: "Expert",
+            icon: <SiGraphql />,
+            name: "GraphQL",
         },
         {
-            icon: <SiNextdotjs />,
-            name: "Next.js",
-            level: "Intermediate",
+            icon: <SiPostgresql />,
+            name: "PostgreSQL",
         },
         {
-            icon: <FaNodeJs />,
-            name: "Node.js",
-            level: "Intermediate",
+            icon: <SiMongodb />,
+            name: "MongoDB",
         },
         {
-            icon: <SiTailwindcss />,
-            name: "Tailwind CSS",
-            level: "Intermediate",
+            icon: <SiRedis />,
+            name: "Redis",
         },
         {
-            icon: <FaFigma />,
-            name: "Figma",
-            level: "Intermediate",
+            icon: <SiDocker />,
+            name: "Docker",
+        },
+        {
+            icon: <SiKubernetes />,
+            name: "Kubernetes",
+        },
+        {
+            icon: <FaAws />,
+            name: "AWS",
+        },
+        {
+            icon: <SiGooglecloud />,
+            name: "Google Cloud",
+        },
+        {
+            icon: <SiJenkins />,
+            name: "Jenkins / CI-CD",
         },
     ]
 }

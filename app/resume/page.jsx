@@ -109,6 +109,38 @@ const projects = [
     image: "/assets/work/pizz-hub.png",
     github: "https://github.com/gianglt2198/shopping-eds",
   },
+  {
+    num: "04",
+    category: "agentic AI",
+    title: "Natural Language to SQL Agent",
+    description:
+      "A production-structured Python agent that converts natural language questions into SQL queries and returns human-readable answers. Uses a ReAct tool-calling loop with OpenRouter for LLM access and async SQLAlchemy for safe, validated query execution.",
+    stack: [
+      { name: "Python" },
+      { name: "OpenRouter" },
+      { name: "SQLAlchemy" },
+      { name: "Pydantic" },
+      { name: "ReAct" },
+    ],
+    image: "/assets/work/natural-language-sql-agent.png",
+    github: "https://github.com/gianglt2198/natural-language-sql-agent",
+  },
+  {
+    num: "05",
+    category: "agentic AI",
+    title: "Clothing Recommendation Agent",
+    description:
+      "A ReAct AI agent built with LangChain and LangGraph that fetches live weather via Tavily web search and recommends clothing accordingly. Runs the full Think → Act → Observe loop powered by an OpenRouter-hosted LLM.",
+    stack: [
+      { name: "Python" },
+      { name: "LangChain" },
+      { name: "LangGraph" },
+      { name: "OpenRouter" },
+      { name: "Tavily" },
+    ],
+    image: "/assets/work/clothing-recommendation-agent.png",
+    github: "https://github.com/gianglt2198/clothing-rcm-agent",
+  },
 ];
 
 const experience = {
@@ -385,6 +417,7 @@ const About = () => {
                           <Image
                             src={p.image}
                             fill
+                            sizes="(max-width: 1200px) 100vw, 50vw"
                             className="object-fill"
                             alt={p.title}
                           />

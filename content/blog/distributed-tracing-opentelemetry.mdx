@@ -1,0 +1,130 @@
+---
+title: "Distributed Tracing Across 12 Services with OpenTelemetry"
+excerpt: "Wiring end-to-end tracing across a 12-service mesh without touching business logic, using OTEL auto-instrumentation and Grafana Tempo."
+date: "2026-03-18"
+readTime: "9 min"
+tags: ["Observability", "DevOps"]
+cover: "https://picsum.photos/seed/opentelemetry-golang/600/380"
+---
+
+Last year our on-call rotations were dominated by one question: "which of the 12 services caused this latency spike?" Distributed tracing transformed that from a 45-minute archaeological dig into a 30-second Grafana query. Here's what the rollout looked like.
+
+## The Before State
+
+We had per-service logs, Prometheus metrics, and a lot of grep. When a user reported a checkout taking 8 seconds instead of 400ms, we'd correlate request IDs across log files from the API gateway, auth service, inventory service, pricing service, and payment service. Most of the time we found the culprit. But the Mean Time to Identify (MTTI) was unacceptably high, and we had no visibility into how spans composed across services.
+
+## Choosing OpenTelemetry
+
+OTEL gave us two things a vendor-specific SDK couldn't: portability and auto-instrumentation. The auto-instrumentation libraries for Go handle HTTP clients, gRPC, database drivers, and Redis clients with minimal setup. We didn't have to instrument the 120,000 lines of existing business logic.
+
+## The Collector Architecture
+
+Rather than exporting traces directly from each service to Tempo, we run an OTel Collector as a DaemonSet. Services export to `localhost:4318` (OTLP/HTTP). The Collector batches, samples, and exports to Tempo:
+
+```yaml
+# otel-collector-config.yaml
+receivers:
+  otlp:
+    protocols:
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  batch:
+    timeout: 1s
+    send_batch_size: 1024
+  tail_sampling:
+    decision_wait: 10s
+    policies:
+      - name: error-policy
+        type: status_code
+        status_code: { status_codes: [ERROR] }
+      - name: slow-policy
+        type: latency
+        latency: { threshold_ms: 500 }
+      - name: probabilistic
+        type: probabilistic
+        probabilistic: { sampling_percentage: 5 }
+
+exporters:
+  otlp/tempo:
+    endpoint: tempo:4317
+    tls:
+      insecure: true
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [batch, tail_sampling]
+      exporters: [otlp/tempo]
+```
+
+The `tail_sampling` processor is crucial. Head-based sampling (random 5% of all traces) misses most errors and slow requests by definition. Tail sampling lets us keep 100% of error traces and all traces over 500ms, while probabilistically sampling the happy path at 5%.
+
+## Instrumenting a Go Service
+
+For a net/http server, the setup is about 20 lines:
+
+```go
+import (
+    "go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+    "go.opentelemetry.io/otel"
+    "go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
+    sdktrace "go.opentelemetry.io/otel/sdk/trace"
+)
+
+func initTracer(ctx context.Context) (func(), error) {
+    exp, err := otlptracehttp.New(ctx,
+        otlptracehttp.WithEndpoint("localhost:4318"),
+        otlptracehttp.WithInsecure(),
+    )
+    if err != nil {
+        return nil, err
+    }
+    tp := sdktrace.NewTracerProvider(
+        sdktrace.WithBatcher(exp),
+        sdktrace.WithResource(resource.NewWithAttributes(
+            semconv.SchemaURL,
+            semconv.ServiceNameKey.String("inventory-service"),
+        )),
+    )
+    otel.SetTracerProvider(tp)
+    otel.SetTextMapPropagator(propagation.TraceContext{})
+    return func() { tp.Shutdown(ctx) }, nil
+}
+
+// Wrap the handler
+mux.Handle("/", otelhttp.NewHandler(mux, "root"))
+```
+
+The `otelhttp` middleware automatically propagates `traceparent` headers on outbound HTTP calls made with the instrumented client.
+
+## Adding Business-Level Spans
+
+Auto-instrumentation gives you the I/O spans. For meaningful business context, add manual spans at the service boundary:
+
+```go
+func (s *InventoryService) Reserve(ctx context.Context, itemID string, qty int) error {
+    ctx, span := otel.Tracer("inventory").Start(ctx, "Reserve")
+    defer span.End()
+
+    span.SetAttributes(
+        attribute.String("item.id", itemID),
+        attribute.Int("item.qty", qty),
+    )
+
+    if err := s.db.DecrementStock(ctx, itemID, qty); err != nil {
+        span.RecordError(err)
+        span.SetStatus(codes.Error, err.Error())
+        return err
+    }
+    return nil
+}
+```
+
+## The Payoff
+
+Three weeks after full rollout: MTTI dropped from ~45 minutes to under 5 minutes for most incidents. The most satisfying moment was identifying a missing database index in the pricing service — visible as a 200ms span on every checkout trace — that we'd never have found by staring at aggregate p99 metrics.
+
+The one thing I'd do differently: set up Grafana Tempo from the start with TraceQL. We spent a month exporting to Jaeger before migrating, and the query experience in Tempo is significantly better for ad-hoc investigation.

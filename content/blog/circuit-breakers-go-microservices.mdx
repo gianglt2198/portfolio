@@ -1,0 +1,88 @@
+---
+title: "Implementing Circuit Breakers in Go Microservices"
+excerpt: "A practical walkthrough of the circuit breaker pattern using Sony's gobreaker and a custom state machine for fine-grained control."
+date: "2026-04-29"
+readTime: "8 min"
+tags: ["Golang", "Microservices"]
+cover: "https://picsum.photos/seed/circuit-breaker-go/600/380"
+---
+
+The circuit breaker pattern is one of those things that sounds simple until your first production outage teaches you why the details matter. Here's the implementation we settled on after two years of iteration.
+
+## The Problem With Naive Retries
+
+When a downstream service starts returning 503s, the worst thing you can do is retry aggressively. You amplify load on an already struggling system and create a thundering-herd storm when it recovers. Circuit breakers solve this by tracking failure rates and short-circuiting calls after a threshold is crossed — giving the downstream service breathing room to recover.
+
+## Starting With gobreaker
+
+Sony's `gobreaker` library gives you a solid foundation. The core abstraction is a `CircuitBreaker` wrapping any function call:
+
+```go
+import "github.com/sony/gobreaker"
+
+cb := gobreaker.NewCircuitBreaker(gobreaker.Settings{
+    Name:        "payment-service",
+    MaxRequests: 3,                // half-open: max requests before tripping
+    Interval:    30 * time.Second, // stat window
+    Timeout:     10 * time.Second, // time in open before half-open probe
+    ReadyToTrip: func(counts gobreaker.Counts) bool {
+        failureRatio := float64(counts.TotalFailures) / float64(counts.Requests)
+        return counts.Requests >= 5 && failureRatio >= 0.6
+    },
+})
+```
+
+The `ReadyToTrip` function is where the real tuning happens. A pure failure count is too blunt — a single slow network blip during low traffic shouldn't trip the breaker. Using a failure ratio with a minimum request count gives you a meaningful signal.
+
+## Wrapping the HTTP Client
+
+We wrap the breaker at the client boundary, not inside business logic:
+
+```go
+type PaymentClient struct {
+    http *http.Client
+    cb   *gobreaker.CircuitBreaker
+}
+
+func (c *PaymentClient) Charge(ctx context.Context, req ChargeRequest) (*ChargeResponse, error) {
+    result, err := c.cb.Execute(func() (any, error) {
+        return c.doCharge(ctx, req)
+    })
+    if err != nil {
+        if errors.Is(err, gobreaker.ErrOpenState) {
+            return nil, ErrCircuitOpen // surfaced to caller as a distinct error
+        }
+        return nil, err
+    }
+    return result.(*ChargeResponse), nil
+}
+```
+
+Surfacing `ErrCircuitOpen` as a typed error matters: the caller can decide whether to serve a cached result, enqueue for later, or return a degraded-mode response — rather than treating it as a generic network failure.
+
+## State Change Hooks for Observability
+
+gobreaker fires `OnStateChange` on every transition. Wire this into your metrics and alerting from day one:
+
+```go
+OnStateChange: func(name string, from, to gobreaker.State) {
+    metrics.CircuitBreakerTransition.WithLabelValues(name, from.String(), to.String()).Inc()
+    if to == gobreaker.StateOpen {
+        alerting.Fire(fmt.Sprintf("circuit breaker %s opened", name))
+    }
+},
+```
+
+We paged on `closed → open` transitions. After seeing enough of them we stopped paging on the transition itself and started tracking open-duration — a breaker that trips and recovers in 15 seconds is normal; one that stays open for 3 minutes is the actual incident.
+
+## Where gobreaker Falls Short
+
+gobreaker's state is in-process. If you run multiple replicas, each pod has an independent breaker — one pod can be happily sending requests while another has tripped. For most cases this is fine (the open pod will back off; the others will see the same failures soon). But for low-traffic downstream services where failures are rare, the minimum-request threshold never gets reached on any single pod.
+
+Our solution: a Redis-backed failure counter shared across replicas, with the breaker logic reimplemented as a Lua script for atomicity. We open-source this soon, but the short version is: `INCR` on failure, `TTL`-based window, trip if ratio exceeds threshold across a shared count.
+
+## Lessons Learned
+
+- Set `Timeout` (the half-open probe interval) to match the downstream service's typical recovery time. Too short and you hammer a recovering service. Too long and you stay dark longer than necessary.
+- Log the circuit state on every outbound call in your structured logs. When debugging an incident, "why did no payments go through for 2 minutes?" is much easier to answer when your logs show `circuit_state=open`.
+- Never use a single global breaker. Per-endpoint or per-operation granularity is worth the boilerplate.

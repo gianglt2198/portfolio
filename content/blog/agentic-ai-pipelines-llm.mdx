@@ -1,0 +1,157 @@
+---
+title: "Agentic AI Pipelines: Building Reliable LLM Systems"
+excerpt: "Patterns for structured output, tool calling, and retry logic when building production-grade agentic systems on top of LLMs."
+date: "2026-01-22"
+readTime: "10 min"
+tags: ["AI", "Architecture"]
+cover: "https://picsum.photos/seed/agentic-ai-systems/600/380"
+---
+
+LLMs are powerful but unreliable in ways that are unfamiliar to engineers who build deterministic systems. Here are the patterns I've settled on after building several production agentic pipelines in Go.
+
+## The Core Challenge
+
+A traditional microservice either returns a valid response or an error. An LLM call returns a blob of text that might be valid JSON, almost-valid JSON, valid JSON with the wrong schema, a refusal, or a hallucinated tool call. Your pipeline code must handle all of these gracefully.
+
+## Structured Output First
+
+The single most effective reliability improvement is using your model's structured output mode (also called JSON mode or constrained generation). Instead of asking the model to "respond in JSON," you provide a schema and the model is constrained to produce valid output matching it.
+
+With the Anthropic SDK in Go:
+
+```go
+type ExtractionResult struct {
+    Entities  []Entity `json:"entities"`
+    Sentiment string   `json:"sentiment"`
+    Summary   string   `json:"summary"`
+}
+
+resp, err := client.Messages.New(ctx, anthropic.MessageNewParams{
+    Model:     anthropic.ModelClaude3_5SonnetLatest,
+    MaxTokens: 1024,
+    Messages:  []anthropic.MessageParam{userMessage},
+    Tools: []anthropic.ToolParam{
+        {
+            Name:        "extract_entities",
+            Description: "Extract structured information from the document",
+            InputSchema: jsonSchemaOf[ExtractionResult](),
+        },
+    },
+    ToolChoice: anthropic.ToolChoiceParam{
+        Type: anthropic.ToolChoiceTypeToolChoice,
+        Name: anthropic.String("extract_entities"),
+    },
+})
+```
+
+Forcing a specific tool call ensures the model always returns the schema you expect. The days of regex-parsing LLM output are over.
+
+## Retry With Exponential Backoff
+
+Rate limit errors (429) and transient API errors (529) are facts of life at scale. Wrap every LLM call in a retry loop:
+
+```go
+func callWithRetry(ctx context.Context, fn func() (*Response, error)) (*Response, error) {
+    backoff := 1 * time.Second
+    for attempt := range 5 {
+        resp, err := fn()
+        if err == nil {
+            return resp, nil
+        }
+        var apiErr *anthropic.APIError
+        if errors.As(err, &apiErr) {
+            switch apiErr.StatusCode {
+            case 429, 529:
+                jitter := time.Duration(rand.Int63n(int64(backoff)))
+                select {
+                case <-time.After(backoff + jitter):
+                case <-ctx.Done():
+                    return nil, ctx.Err()
+                }
+                backoff = min(backoff*2, 60*time.Second)
+                continue
+            case 400, 401, 403:
+                return nil, err // non-retryable
+            }
+        }
+        if attempt == 4 {
+            return nil, fmt.Errorf("exhausted retries: %w", err)
+        }
+    }
+    return nil, errors.New("unreachable")
+}
+```
+
+Always respect the `Retry-After` header when present — it's more accurate than your backoff schedule.
+
+## Tool Calling Loops
+
+Agentic pipelines involve repeated tool-call cycles: model requests a tool, you execute it, you return the result, model decides whether to call another tool or finish. The loop structure matters:
+
+```go
+func runAgent(ctx context.Context, task string) (string, error) {
+    messages := []anthropic.MessageParam{
+        anthropic.NewUserMessage(anthropic.NewTextBlock(task)),
+    }
+
+    for range 10 { // max iterations guard
+        resp, err := callWithRetry(ctx, func() (*anthropic.Message, error) {
+            return client.Messages.New(ctx, anthropic.MessageNewParams{
+                Model:    model,
+                Messages: messages,
+                Tools:    availableTools,
+            })
+        })
+        if err != nil {
+            return "", err
+        }
+
+        messages = append(messages, resp.ToParam())
+
+        if resp.StopReason == anthropic.StopReasonEndTurn {
+            return extractTextContent(resp), nil
+        }
+
+        // execute tool calls and collect results
+        var toolResults []anthropic.ContentBlockParamUnion
+        for _, block := range resp.Content {
+            if block.Type != anthropic.ContentBlockTypeToolUse {
+                continue
+            }
+            result, err := executeTool(ctx, block.Name, block.Input)
+            toolResults = append(toolResults, anthropic.NewToolResultBlock(block.ID, result, err != nil))
+        }
+
+        messages = append(messages, anthropic.NewUserMessage(toolResults...))
+    }
+
+    return "", errors.New("agent exceeded max iterations")
+}
+```
+
+The iteration guard is non-negotiable. Without it, a misbehaving model can loop indefinitely and rack up enormous API bills.
+
+## Prompt Caching for Repeated Context
+
+If your agent pipelines re-send the same large system prompt or context documents on every call, prompt caching dramatically reduces latency and cost. Mark the static portions with `cache_control`:
+
+```go
+systemPrompt := anthropic.NewTextBlock(largeSystemPrompt)
+systemPrompt.CacheControl = &anthropic.CacheControlEphemeralParam{Type: "ephemeral"}
+```
+
+Cache hits have ~4x lower latency than cache misses for large prompts. For pipelines that process thousands of documents against the same instructions, this is the single highest-leverage optimization available.
+
+## Observability
+
+LLM pipelines have unique observability requirements. Log these on every call:
+
+- Model, temperature, max_tokens
+- Input token count, output token count, cache read tokens
+- Stop reason
+- Latency (total, time-to-first-token if streaming)
+- Tool calls made (name, arguments hash, result summary)
+
+Token counts feed cost dashboards. Stop reasons surface unexpected `max_tokens` truncations. Tool call logs let you reconstruct agent reasoning for debugging.
+
+Building reliable agentic systems is mostly about accepting that the model output is probabilistic and building the deterministic scaffolding around it to compensate — not trying to make the model more deterministic through prompt engineering alone.

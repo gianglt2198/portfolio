@@ -1,0 +1,116 @@
+---
+title: "Building a Distributed Task Queue with Golang and Redis Streams"
+excerpt: "How I designed a fault-tolerant task queue processing 50k+ jobs per second using Redis Streams consumer groups and a dead-letter retry mechanism."
+date: "2026-05-14"
+readTime: "11 min"
+tags: ["Golang", "Redis"]
+cover: "https://picsum.photos/seed/task-queue-golang/880/500"
+featured: true
+---
+
+When we needed to process over 50,000 background jobs per second without dropping a single one, I reached for Redis Streams. Here's what I learned building and running it in production.
+
+## Why Not Kafka?
+
+Our first instinct was Kafka. It's battle-tested for high-throughput event pipelines. But Kafka brought operational overhead we couldn't justify for a team of five: cluster management, Zookeeper (or KRaft), schema registry, connector ecosystem. Redis was already in our stack as a cache. Redis Streams added exactly what we needed without a new infrastructure tier.
+
+## The Data Model
+
+Each job is a Redis Stream entry with a structured payload:
+
+```go
+type Job struct {
+    ID        string          `json:"id"`
+    Type      string          `json:"type"`
+    Payload   json.RawMessage `json:"payload"`
+    Attempt   int             `json:"attempt"`
+    CreatedAt time.Time       `json:"created_at"`
+}
+```
+
+We enqueue by writing to a stream key per job type — `jobs:email`, `jobs:invoice`, `jobs:webhook`. Separating streams by type lets us tune consumer group sizes independently and avoid a noisy-neighbor problem where a spike in webhook jobs starves invoice processing.
+
+## Consumer Groups
+
+Redis Streams consumer groups give you exactly-once delivery semantics within a group. Each message is delivered to exactly one consumer, and it stays "pending" until explicitly acknowledged:
+
+```go
+func (w *Worker) run(ctx context.Context) error {
+    for {
+        entries, err := w.redis.XReadGroup(ctx, &redis.XReadGroupArgs{
+            Group:    w.group,
+            Consumer: w.id,
+            Streams:  []string{w.stream, ">"},
+            Count:    10,
+            Block:    2 * time.Second,
+        }).Result()
+        if err != nil && !errors.Is(err, redis.Nil) {
+            return err
+        }
+        for _, e := range entries[0].Messages {
+            if err := w.process(ctx, e); err != nil {
+                w.requeueOrDead(ctx, e)
+                continue
+            }
+            w.redis.XAck(ctx, w.stream, w.group, e.ID)
+        }
+    }
+}
+```
+
+The `">"` special ID tells Redis to deliver only new, undelivered messages. If a consumer crashes mid-processing, those messages remain in the pending entry list (PEL) and are reclaimed by the reaper.
+
+## The Reaper: Reclaiming Stuck Messages
+
+Any job not acknowledged within 30 seconds is fair game for reclaim. A background goroutine runs `XAUTOCLAIM` every 10 seconds:
+
+```go
+func (r *Reaper) sweep(ctx context.Context) {
+    start := "0-0"
+    for {
+        msgs, _, err := r.redis.XAutoClaim(ctx, &redis.XAutoClaimArgs{
+            Stream:   r.stream,
+            Group:    r.group,
+            Consumer: r.reaperID,
+            MinIdle:  30 * time.Second,
+            Start:    start,
+            Count:    100,
+        }).Result()
+        // re-enqueue msgs or move to DLQ based on attempt count
+        if len(msgs) < 100 {
+            break
+        }
+    }
+}
+```
+
+## Dead-Letter Queue
+
+Jobs that fail more than 5 times move to a dead-letter stream (`jobs:dlq`) with the original payload and error context intact. An internal dashboard surfaces DLQ entries for manual review and one-click replay.
+
+```go
+func (w *Worker) requeueOrDead(ctx context.Context, msg redis.XMessage) {
+    attempt := parseAttempt(msg) + 1
+    if attempt >= maxAttempts {
+        w.redis.XAdd(ctx, &redis.XAddArgs{
+            Stream: "jobs:dlq",
+            Values: map[string]any{
+                "original_stream": w.stream,
+                "payload":         msg.Values["payload"],
+                "error":           w.lastErr.Error(),
+                "attempt":         attempt,
+            },
+        })
+        w.redis.XAck(ctx, w.stream, w.group, msg.ID)
+        return
+    }
+    // re-add with incremented attempt, exponential backoff via delayed enqueue
+    w.enqueueDelayed(ctx, msg, backoff(attempt))
+}
+```
+
+## Throughput and Observations
+
+In production across three replica pods (each running 8 consumer goroutines per stream), we sustain ~52k jobs/sec at p99 < 8ms end-to-end latency. Redis CPU stays under 15% on a `cache.r7g.large`.
+
+The one thing I'd change: add per-job-type metrics from day one. We retrofitted Prometheus histograms after the first incident where a slow third-party API blocked our webhook consumers without surfacing clearly in aggregate throughput numbers.

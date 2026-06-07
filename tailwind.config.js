@@ -18,7 +18,8 @@ module.exports = {
 			xl: "1200px",
 		},
 		fontFamily: {
-			primary: "var(--font-jetbrainsMono)",
+			primary: "var(--font-geist)",
+			mono: "var(--font-geist-mono)",
 		},
 		extend: {
 			colors: {
@@ -32,7 +33,9 @@ module.exports = {
 					DEFAULT: 'hsl(var(--popover))',
 					foreground: 'hsl(var(--popover-foreground))'
 				},
-				primary: "#1c1c22",
+				primary: "#09090b",
+				surface: "#111113",
+				"surface-2": "#1c1c1f",
 				secondary: {
 					DEFAULT: 'hsl(var(--secondary))',
 					foreground: 'hsl(var(--secondary-foreground))'
@@ -42,9 +45,11 @@ module.exports = {
 					foreground: 'hsl(var(--muted-foreground))'
 				},
 				accent: {
-					DEFAULT: '#00ff99',
+					DEFAULT: '#60a5fa',
+					hover: '#93c5fd',
+					btn: '#2563eb',
+					'btn-hover': '#1d4ed8',
 					foreground: 'hsl(var(--accent-foreground))',
-					hover: "#00e187",
 				},
 				destructive: {
 					DEFAULT: 'hsl(var(--destructive))',
@@ -68,5 +73,5 @@ module.exports = {
 			},
 		}
 	},
-	plugins: [require("tailwindcss-animate")],
+	plugins: [require("tailwindcss-animate"), require("@tailwindcss/typography")],
 };

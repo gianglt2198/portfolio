@@ -1,0 +1,128 @@
+---
+title: "CQRS and Event Sourcing in Practice with Golang"
+excerpt: "Moving a high-write service from CRUD to event sourcing: the tradeoffs, the pitfalls, and what I would do differently next time."
+date: "2026-02-05"
+readTime: "13 min"
+tags: ["Architecture", "Golang"]
+cover: "https://picsum.photos/seed/cqrs-golang-arch/600/380"
+---
+
+Event sourcing is one of those patterns that sounds elegant in theory but has a steep operational learning curve. After migrating our order management service, here's an honest account of what worked, what didn't, and the decisions I'd reconsider.
+
+## What We Were Solving
+
+The order service started as a standard CRUD service: `orders` table, status column, updated_at timestamp. Eighteen months in, we had three problems:
+
+1. **No audit trail.** When a customer disputed a charge, we had the current state but not the history of how we got there.
+2. **Race conditions.** Two concurrent fulfillment workers could both read `status = 'pending'` and both try to fulfill the same order.
+3. **Read model flexibility.** The ops team wanted dashboards with aggregations that were expensive to compute from the normalized schema.
+
+CQRS + Event Sourcing addressed all three.
+
+## The Event Store
+
+We built the event store on top of PostgreSQL — not a specialized tool like EventStoreDB. The schema is intentionally simple:
+
+```sql
+CREATE TABLE events (
+    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    stream_id   UUID        NOT NULL,
+    stream_type TEXT        NOT NULL,
+    event_type  TEXT        NOT NULL,
+    payload     JSONB       NOT NULL,
+    version     BIGINT      NOT NULL,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (stream_id, version)
+);
+
+CREATE INDEX idx_events_stream ON events (stream_id, version);
+```
+
+The `UNIQUE (stream_id, version)` constraint is load-bearing. It's the optimistic concurrency check: if two writers try to append version 5 simultaneously, one wins and one gets a unique violation — which we translate to a domain conflict error and retry.
+
+## Aggregates in Go
+
+An aggregate holds the current state (projected from its event history) and exposes commands that produce new events:
+
+```go
+type Order struct {
+    ID      uuid.UUID
+    Status  OrderStatus
+    Items   []LineItem
+    version int
+}
+
+func (o *Order) Apply(evt Event) {
+    switch e := evt.(type) {
+    case OrderPlaced:
+        o.ID = e.OrderID
+        o.Items = e.Items
+        o.Status = StatusPending
+    case OrderFulfilled:
+        o.Status = StatusFulfilled
+    case OrderCancelled:
+        o.Status = StatusCancelled
+    }
+    o.version++
+}
+
+func (o *Order) Fulfill(by string) ([]Event, error) {
+    if o.Status != StatusPending {
+        return nil, ErrInvalidTransition{From: o.Status, To: StatusFulfilled}
+    }
+    return []Event{OrderFulfilled{OrderID: o.ID, FulfilledBy: by, At: time.Now()}}, nil
+}
+```
+
+The `Apply` method is pure: no I/O, no side effects. This makes aggregates trivially testable.
+
+## The Command Handler
+
+The command handler loads the aggregate, executes the command, and appends the resulting events:
+
+```go
+func (h *FulfillOrderHandler) Handle(ctx context.Context, cmd FulfillOrder) error {
+    order, err := h.store.Load(ctx, cmd.OrderID)
+    if err != nil {
+        return err
+    }
+
+    events, err := order.Fulfill(cmd.FulfilledBy)
+    if err != nil {
+        return err
+    }
+
+    return h.store.Append(ctx, order.ID, order.version, events)
+}
+```
+
+The `order.version` passed to `Append` is the expected version. If another writer has already appended to this stream since we loaded, the unique constraint fires and we retry.
+
+## Read Models via Projections
+
+The read side is simple: projections subscribe to the event stream and build materialized views. We use PostgreSQL LISTEN/NOTIFY to push new events to projection workers:
+
+```go
+func (p *OrderSummaryProjection) On(evt Event) error {
+    switch e := evt.(type) {
+    case OrderPlaced:
+        return p.db.Exec(`INSERT INTO order_summaries (id, status, total, created_at)
+            VALUES ($1, 'pending', $2, $3)`, e.OrderID, e.Total, e.At)
+    case OrderFulfilled:
+        return p.db.Exec(`UPDATE order_summaries SET status = 'fulfilled' WHERE id = $1`, e.OrderID)
+    }
+    return nil
+}
+```
+
+Read models are rebuilt from scratch by replaying the full event stream — useful after schema changes or when adding a new projection.
+
+## What I'd Do Differently
+
+**Event versioning from day one.** We added a `schema_version` field to events in month 3 after the first breaking payload change. Retrofitting versioning is painful. Start with it.
+
+**Don't event-source everything.** We got carried away and event-sourced a session state service. Sessions don't need an audit trail, don't have concurrent writers, and have high write volume. Pure CRUD would have been fine. Event sourcing adds complexity — only apply it where the benefits are concrete.
+
+**Snapshot support early.** Loading an aggregate with 2,000 events takes real time. We added snapshots (periodic event-count-based serialized state checkpoints) after noticing P99 command latency creeping up. Build the snapshot mechanism before you need it.
+
+Event sourcing made our order service substantially more robust and auditable. But it's not a default choice — pick it when the audit trail, concurrency model, or read-model flexibility are actual requirements, not aspirational ones.

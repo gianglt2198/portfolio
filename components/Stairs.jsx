@@ -39,7 +39,7 @@ const Stairs = () => {
                         duration: 0.4,
                         delay: reversedIndex(index) * 0.1
                     }}
-                    className="w-full h-full bg-white relative" />
+                    className="w-full h-full bg-white/20 backdrop-blur-md relative" />
             })}
         </>
     )

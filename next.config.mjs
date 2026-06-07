@@ -4,6 +4,9 @@ const nextConfig = {
     // allow the local SVG placeholder used on the Work page to be served
     dangerouslyAllowSVG: true,
     contentDispositionType: "inline",
+    remotePatterns: [
+      { protocol: "https", hostname: "picsum.photos" },
+    ],
   },
 };
 

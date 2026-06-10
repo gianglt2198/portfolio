@@ -96,18 +96,19 @@ const projects = [
   {
     num: "03",
     category: "backend",
-    title: "Shopping Microservices",
+    title: "Pizza Hub DevOps",
     description:
-      "A microservices e-commerce platform in Go with event-driven architecture, featuring four independent bounded contexts (Customer, Product, Payment, Order) communicating through asynchronous event streams and unified gRPC/REST APIs.",
+      "Production-ready CI/CD pipeline on AWS — Go REST API deployed automatically from code to cloud using Terraform, GitHub Actions, Docker, EKS, Helm, Kustomize, and ArgoCD.",
     stack: [
       { name: "Go" },
-      { name: "gRPC" },
-      { name: "PostgreSQL" },
-      { name: "NATS JetStream" },
+      { name: "Terraform" },
+      { name: "GitHub Actions" },
+      { name: "Kubernetes" },
+      { name: "ArgoCD" },
       { name: "Docker" },
     ],
     image: "/assets/work/pizz-hub.png",
-    github: "https://github.com/gianglt2198/shopping-eds",
+    github: "https://github.com/gianglt2198/pizza-hub",
   },
   {
     num: "04",
